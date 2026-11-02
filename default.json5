@@ -1,0 +1,153 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  description: "Shared Renovate base config. Repo-specific packageRules go in each repo and override these (later rules win).",
+  // ---- Global behaviour ----
+  extends: [
+    "config:best-practices",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    ":dependencyDashboard",
+    "mergeConfidence:age-confidence-badges",
+  ],
+  labels: ["renovate", "dependencies"],
+  dependencyDashboardLabels: ["renovate"],
+  commitMessageTopic: "{{datasource}} dependency {{depName}}",
+  prConcurrentLimit: 10,
+  prHourlyLimit: 10,
+  // Cooldown: wait 7 days after release; "strict" holds the PR back until then
+  minimumReleaseAge: "7 days",
+  internalChecksFilter: "strict",
+  // Security advisories (GitHub + OSV)
+  vulnerabilityAlerts: {
+    enabled: true,
+    addLabels: ["security"],
+    semanticCommitType: "fix",
+  },
+  osvVulnerabilityAlerts: true,
+  platformAutomerge: false,
+  // ---- Managers ----
+  // uv.lock
+  lockFileMaintenance: {
+    enabled: true,
+    // weekly, to avoid PRs at any time (UTC)
+    schedule: ["before 6am on monday"],
+  },
+  // .pre-commit-config.yaml: `rev:` of each hook repo
+  "pre-commit": {
+    enabled: true,
+  },
+  // .pre-commit-config.yaml: `default_language_version: node:`
+  customManagers: [
+    {
+      customType: "regex",
+      description: "Track the Node runtime used by pre-commit hooks (default_language_version: node:)",
+      managerFilePatterns: ["/^\\.pre-commit-config\\.ya?ml$/"],
+      matchStrings: [
+        "(?:^|\\r?\\n)default_language_version:[ \\t]*\\r?\\n(?:[ \\t]+[^\\r\\n]*\\r?\\n)*?[ \\t]+node:[ \\t]*['\"]?(?<currentValue>\\d+\\.\\d+\\.\\d+)['\"]?[ \\t]*(?:#[^\\r\\n]*)?(?:\\r?\\n|$)",
+      ],
+      depNameTemplate: "node",
+      datasourceTemplate: "node-version",
+      versioningTemplate: "node",
+    }
+  ],
+  // ---- Rules ---- (later packageRules override earlier ones)
+  packageRules: [
+    // pyproject.toml (all): releases compatible with `requires-python`
+    {
+      description: "pyproject.toml (all): releases compatible with requires-python",
+      matchDatasources: ["pypi"],
+      constraintsFiltering: "strict",
+    },
+    // pyproject.toml: `[project] requires-python`
+    {
+      description: "pyproject.toml [project] requires-python: widen after reviewing the CI matrix and all project constraints",
+      matchManagers: ["pep621"],
+      matchDepTypes: ["requires-python"],
+      rangeStrategy: "widen",
+      semanticCommitType: "fix",
+      groupName: "python runtime",
+      dependencyDashboardApproval: true,
+    },
+    // Dockerfile*: `FROM python:...`
+    {
+      description: "Dockerfile FROM python:... keeps pace with supported-runtime updates",
+      matchManagers: ["dockerfile"],
+      matchPackageNames: ["python"],
+      groupName: "python runtime",
+      semanticCommitType: "fix",
+      dependencyDashboardApproval: true,
+    },
+    // .pre-commit-config.yaml: `rev:` of each hook repo
+    {
+      description: "Group pre-commit updates (tooling only, no release)",
+      matchManagers: ["pre-commit"],
+      groupName: "pre-commit dependencies",
+      groupSlug: "pre-commit",
+      semanticCommitType: "chore",
+    },
+    // .pre-commit-config.yaml: `default_language_version: node:`
+    {
+      description: "Pre-commit Node runtime updates are tooling",
+      matchManagers: ["custom.regex"],
+      matchDatasources: ["node-version"],
+      matchPackageNames: ["node"],
+      semanticCommitType: "chore",
+      ignoreUnstable: true,
+      rangeStrategy: "pin",
+    },
+    // .pre-commit-config.yaml: `default_language_version: node:` (major)
+    {
+      description: "Review major LTS upgrades of the pre-commit Node runtime",
+      matchManagers: ["custom.regex"],
+      matchDatasources: ["node-version"],
+      matchPackageNames: ["node"],
+      matchUpdateTypes: ["major"],
+      addLabels: ["needs-compatibility-review"],
+    },
+    // .github/workflows/*.yml, .github/actions/*/action.yml: `uses:`
+    {
+      description: "Group GitHub Actions updates (CI only, no release)",
+      matchManagers: ["github-actions"],
+      groupName: "github-actions",
+      groupSlug: "github-actions",
+      semanticCommitType: "chore",
+    },
+    // pyproject.toml: `[project] dependencies`, `[project.optional-dependencies]`
+    {
+      description: "Runtime Python dependencies and extras -> trigger a patch release",
+      matchManagers: ["pep621"],
+      matchDepTypes: ["dependencies", "project.dependencies", "project.optional-dependencies"],
+      groupName: "python dependencies",
+      groupSlug: "python",
+      semanticCommitType: "fix",
+      rangeStrategy: "pin",
+    },
+    // pyproject.toml: `[dependency-groups]`
+    {
+      description: "Dev/docs Python dependency updates (dependency-groups) -> tooling only, no release",
+      matchManagers: ["pep621"],
+      matchDepTypes: ["devDependencies", "dependency-groups"],
+      groupName: "python dev dependencies",
+      groupSlug: "python-dev",
+      semanticCommitType: "chore",
+      rangeStrategy: "pin",
+    },
+    // pyproject.toml: `[project] dependencies`, `[project.optional-dependencies]` (major)
+    {
+      description: "Major bumps of production deps need manual review for breaking changes",
+      matchManagers: ["pep621"],
+      matchDepTypes: ["dependencies", "project.dependencies", "project.optional-dependencies"],
+      matchUpdateTypes: ["major"],
+      addLabels: ["needs-breaking-review"],
+      semanticCommitType: "fix",
+    },
+    // pyproject.toml: `[build-system] requires` (declare both bounds: `>=floor,<=latest-tested`)
+    {
+      description: "Build-system requirements: keep a two-sided range (>=floor,<=latest-tested) and move its upper bound",
+      matchManagers: ["pep621"],
+      matchDepTypes: ["build-system.requires"],
+      rangeStrategy: "replace",
+      semanticCommitType: "chore",
+    }
+  ],
+}
